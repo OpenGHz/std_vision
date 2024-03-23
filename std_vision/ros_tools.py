@@ -1,7 +1,5 @@
-import cv2
-import numpy as np
-from numpy import ndarray
 import rospy
+import os
 
 
 class RosTools(object):

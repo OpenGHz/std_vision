@@ -153,7 +153,7 @@ class Contour(object):
                         nearest_rect = r_rect
                         nearest_center = (cx, cy)
                         nearest_w_h = [width, height]
-                        nearest_rotation = -rotation_angle  # 添加负号保持一致
+                        nearest_rotation = rotation_angle
                         if mid_z is not None:
                             nearest_bias = [x_bias, y_bias, z_bias]
                         else:

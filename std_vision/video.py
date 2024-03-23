@@ -17,9 +17,9 @@ except Exception as e:
     print(
         f"{e}\r\n导入ROS相关包时出错。将无法使用ROS相关功能。\r\n若不使用ROS请忽略该报错。\r\n"
     )
-    __USE__ROS__FLAG = False
+    _USE__ROS__FLAG = False
 else:
-    __USE__ROS__FLAG = True
+    _USE__ROS__FLAG = True
 
 
 class StdVideo(object):  # 推荐：import StdVideo as sv
@@ -843,26 +843,19 @@ class StdVideo(object):  # 推荐：import StdVideo as sv
         return cv2.merge(lis)
 
     @classmethod
-    def color_thresh_determine(
-        cls, frame_dev_topic=None, default=0, mode="HSV", save_path=None, show_raw=False
-    ):
-        """# TODO:增加腐蚀膨胀操作的滑条
-        确定最佳HSV阈值的函数：frame可以为图像（ndarray）、设备号（int）或ros话题名（str）
-        frame为none则尝试默认参数进行图片获取：先尝试设备0，再尝试获取ros消息，都不行则报错退出:
-            技巧：可以通过保持frame为none而修改default为其它不存在的设备号来自动触发对ros默认图像话题的连接。
-        mode默认为hsv，另外还可以使用YUV（YCrCb）、LAB。
+    def color_thresh_determine(cls,frame_dev_topic=None,default=0,mode='HSV',save_path=None,show_raw=False):
+        """  # TODO:增加腐蚀膨胀操作的滑条
+            确定最佳HSV阈值的函数：frame可以为图像（ndarray）、设备号（int）或ros话题名（str）
+            frame为none则尝试默认参数进行图片获取：先尝试设备0，再尝试获取ros消息，都不行则报错退出:
+                技巧：可以通过保持frame为none而修改default为其它不存在的设备号来自动触发对ros默认图像话题的连接。
+            mode默认为hsv，另外还可以使用YUV（YCrCb）、LAB。
         """
         # 鲁棒的连接处理
-        flag = 0
-        if frame_dev_topic is None:
-            frame_dev_topic = default
-            flag = 1
+        flag=0
+        if frame_dev_topic is None: frame_dev_topic = default;flag = 1
         # frame_dev_topic本身就是图片
         if isinstance(frame_dev_topic, ndarray):
-
-            def get_img():
-                return frame_dev_topic
-
+            def get_img(): return frame_dev_topic
         # 尝试device
         elif isinstance(frame_dev_topic, int):
             try:
@@ -871,131 +864,111 @@ class StdVideo(object):  # 推荐：import StdVideo as sv
             except:
                 if flag == 1:  # 表明报错是因为default的值有问题
                     frame_dev_topic = "camera/color/image_raw"
-                    print("连接错误：未找到视觉设备，尝试连接ROS")  # 尝试连接ROS
-                else:
-                    cls.Cap(frame_dev_topic)  # 重新尝试连接
+                    print('连接错误：未找到视觉设备，尝试连接ROS')  # 尝试连接ROS
+                else: cls.Cap(frame_dev_topic)  # 重新尝试连接
             else:
-                print(f"成功连接设备号：{frame_dev_topic}")
-
+                print(f'成功连接设备号：{frame_dev_topic}')
                 def get_img():
                     return cls.Read(frame_dev_topic)
-
         # 尝试topic
-        if isinstance(frame_dev_topic, str) and __USE__ROS__FLAG:
+        elif isinstance(frame_dev_topic, str) and _USE__ROS__FLAG:
             import subprocess
-
             try:
                 p = subprocess.getoutput("pgrep rosmaster")
-                if p == "":
-                    exit("连接错误：rosmaster未开启，使用ROS模式请先启动roscore")
+                if p == '': raise Exception('连接错误：rosmaster未开启，使用ROS模式请先启动roscore')
                 else:
-                    NODE_NAME = "color_thresh_determine"
-                    if rospy.get_name() == "":
+                    NODE_NAME = 'color_thresh_determine'
+                    if rospy.get_name() == '/unnamed':
                         rospy.init_node(NODE_NAME)
-                        rospy.loginfo("Initializing {} node.".format(NODE_NAME))
-                    rospy.wait_for_message("camera/color/image_raw", Image, timeout=1)
+                        print(f"Initializing {NODE_NAME} node.")
+                    else:
+                        NODE_NAME = rospy.get_name()
+                        print(f"Node {NODE_NAME} already initialized.")
+                    rospy.wait_for_message("/camera/color/image_raw",Image,timeout=1)
             except:
-                if flag:
-                    exit(
-                        "连接错误：未查询到图片消息，获取消息失败\r\n两种方式均失败，请明确采用的方式及参数后重试"
-                    )
-                else:
-                    exit(f"给定话题{frame_dev_topic}无法获取图片消息")
+                if flag: raise Exception('连接错误：未查询到图片消息，获取消息失败\r\n两种方式均失败，请明确采用的方式及参数后重试')
+                else: raise Exception(f'给定话题{frame_dev_topic}无法获取图片消息')
             else:
-                print(f"成功连接ROS话题:{frame_dev_topic}")
-
+                print(f'成功连接ROS话题:{frame_dev_topic}')
                 def get_img():
                     img = rospy.wait_for_message(frame_dev_topic, Image)
-                    return CvBridge().imgmsg_to_cv2(img, "bgr8")
+                    return CvBridge().imgmsg_to_cv2(img,"bgr8")
 
         # 创建窗口和滑条
         def callback(*arg):
             pass  # 创建空回调函数（比起直接置0更易拓展）
-
-        WINDOW_NAME = "Color pick(按ESC键退出)"
+        WINDOW_NAME = 'Color pick(Press ESC to exit)'
         cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
-        if mode in ["HSV", "hsv"]:
-            cv2.createTrackbar("LH", WINDOW_NAME, 0, 179, callback)
-            cv2.createTrackbar("LS", WINDOW_NAME, 0, 255, callback)
-            cv2.createTrackbar("LV", WINDOW_NAME, 0, 255, callback)
-            cv2.createTrackbar("HH", WINDOW_NAME, 0, 179, callback)
-            cv2.createTrackbar("HS", WINDOW_NAME, 0, 255, callback)
-            cv2.createTrackbar("HV", WINDOW_NAME, 0, 255, callback)
-        elif mode in ["YUV", "YCrCb"]:
-            cv2.createTrackbar("LY ", WINDOW_NAME, 0, 255, callback)
-            cv2.createTrackbar("LCr", WINDOW_NAME, 0, 255, callback)
-            cv2.createTrackbar("LCb", WINDOW_NAME, 0, 255, callback)
-            cv2.createTrackbar("HY ", WINDOW_NAME, 0, 255, callback)
-            cv2.createTrackbar("HCr", WINDOW_NAME, 0, 255, callback)
-            cv2.createTrackbar("HCb", WINDOW_NAME, 0, 255, callback)
-        elif mode in ["LAB", "Lab", "lab"]:
-            cv2.createTrackbar("LL", WINDOW_NAME, 0, 255, callback)
-            cv2.createTrackbar("LA", WINDOW_NAME, 0, 255, callback)
-            cv2.createTrackbar("LB", WINDOW_NAME, 0, 255, callback)
-            cv2.createTrackbar("HL", WINDOW_NAME, 0, 255, callback)
-            cv2.createTrackbar("HA", WINDOW_NAME, 0, 255, callback)
-            cv2.createTrackbar("HB", WINDOW_NAME, 0, 255, callback)
+        if mode in ['HSV','hsv']:
+            cv2.createTrackbar('LH', WINDOW_NAME, 0, 179, callback)
+            cv2.createTrackbar('LS', WINDOW_NAME, 0, 255, callback)
+            cv2.createTrackbar('LV', WINDOW_NAME, 0, 255, callback)
+            cv2.createTrackbar('HH', WINDOW_NAME, 0, 179, callback)
+            cv2.createTrackbar('HS', WINDOW_NAME, 0, 255, callback)
+            cv2.createTrackbar('HV', WINDOW_NAME, 0, 255, callback)
+        elif mode in ['YUV','YCrCb']:
+            cv2.createTrackbar('LY ', WINDOW_NAME, 0, 255, callback)
+            cv2.createTrackbar('LCr', WINDOW_NAME, 0, 255, callback)
+            cv2.createTrackbar('LCb', WINDOW_NAME, 0, 255, callback)
+            cv2.createTrackbar('HY ', WINDOW_NAME, 0, 255, callback)
+            cv2.createTrackbar('HCr', WINDOW_NAME, 0, 255, callback)
+            cv2.createTrackbar('HCb', WINDOW_NAME, 0, 255, callback)
+        elif mode in ['LAB','Lab','lab']:
+            cv2.createTrackbar('LL', WINDOW_NAME, 0, 255, callback)
+            cv2.createTrackbar('LA', WINDOW_NAME, 0, 255, callback)
+            cv2.createTrackbar('LB', WINDOW_NAME, 0, 255, callback)
+            cv2.createTrackbar('HL', WINDOW_NAME, 0, 255, callback)
+            cv2.createTrackbar('HA', WINDOW_NAME, 0, 255, callback)
+            cv2.createTrackbar('HB', WINDOW_NAME, 0, 255, callback)
         # 主循环
         while True:
-            if mode in ["HSV", "hsv"]:
-                LH = cv2.getTrackbarPos("LH", WINDOW_NAME)
-                LS = cv2.getTrackbarPos("LS", WINDOW_NAME)
-                LV = cv2.getTrackbarPos("LV", WINDOW_NAME)
-                HH = cv2.getTrackbarPos("HH", WINDOW_NAME)
-                HS = cv2.getTrackbarPos("HS", WINDOW_NAME)
-                HV = cv2.getTrackbarPos("HV", WINDOW_NAME)
+            if mode in ['HSV','hsv']:
+                LH = cv2.getTrackbarPos('LH', WINDOW_NAME)
+                LS = cv2.getTrackbarPos('LS', WINDOW_NAME)
+                LV = cv2.getTrackbarPos('LV', WINDOW_NAME)
+                HH = cv2.getTrackbarPos('HH', WINDOW_NAME)
+                HS = cv2.getTrackbarPos('HS', WINDOW_NAME)
+                HV = cv2.getTrackbarPos('HV', WINDOW_NAME)
                 ColorL = [LH, LS, LV]
                 ColorH = [HH, HS, HV]
                 img = get_img()
-                res, mask = StdVideo.color_filter(
-                    img, ColorL, ColorH, convert=cls.Types.COLOR_BGR2HSV
-                )
-            elif mode in ["YUV", "YCrCb"]:
-                LY = cv2.getTrackbarPos("LY ", WINDOW_NAME)
-                LCr = cv2.getTrackbarPos("LCr", WINDOW_NAME)
-                LCb = cv2.getTrackbarPos("LCb", WINDOW_NAME)
-                HY = cv2.getTrackbarPos("HY ", WINDOW_NAME)
-                HCr = cv2.getTrackbarPos("HCr", WINDOW_NAME)
-                HCb = cv2.getTrackbarPos("HCb", WINDOW_NAME)
+                res, mask = StdVideo.color_filter(img,ColorL,ColorH,convert=cls.Types.COLOR_BGR2HSV)
+            elif mode in ['YUV','YCrCb']:
+                LY = cv2.getTrackbarPos('LY ', WINDOW_NAME)
+                LCr = cv2.getTrackbarPos('LCr', WINDOW_NAME)
+                LCb = cv2.getTrackbarPos('LCb', WINDOW_NAME)
+                HY = cv2.getTrackbarPos('HY ', WINDOW_NAME)
+                HCr = cv2.getTrackbarPos('HCr', WINDOW_NAME)
+                HCb = cv2.getTrackbarPos('HCb', WINDOW_NAME)
                 ColorL = [LY, LCr, LCb]
                 ColorH = [HY, HCr, HCb]
                 img = get_img()
-                res, mask = StdVideo.color_filter(
-                    img, ColorL, ColorH, convert=cls.Types.COLOR_BGR2YCrCb
-                )
-            elif mode in ["Lab", "LAB"]:
-                LL = cv2.getTrackbarPos("LL", WINDOW_NAME)
-                LA = cv2.getTrackbarPos("LA", WINDOW_NAME)
-                LB = cv2.getTrackbarPos("LB", WINDOW_NAME)
-                HL = cv2.getTrackbarPos("HL", WINDOW_NAME)
-                HA = cv2.getTrackbarPos("HA", WINDOW_NAME)
-                HB = cv2.getTrackbarPos("HB", WINDOW_NAME)
+                res, mask = StdVideo.color_filter(img,ColorL,ColorH,convert=cls.Types.COLOR_BGR2YCrCb)
+            elif mode in ['Lab','LAB']:
+                LL = cv2.getTrackbarPos('LL', WINDOW_NAME)
+                LA = cv2.getTrackbarPos('LA', WINDOW_NAME)
+                LB = cv2.getTrackbarPos('LB', WINDOW_NAME)
+                HL = cv2.getTrackbarPos('HL', WINDOW_NAME)
+                HA = cv2.getTrackbarPos('HA', WINDOW_NAME)
+                HB = cv2.getTrackbarPos('HB', WINDOW_NAME)
                 ColorL = [LL, LA, LB]
                 ColorH = [HL, HA, HB]
                 img = get_img()
-                res, mask = StdVideo.color_filter(
-                    img, ColorL, ColorH, convert=cls.Types.COLOR_BGR2LAB
-                )
-            else:
-                exit("错误：请输入正确的mode参数值")
+                res, mask = StdVideo.color_filter(img,ColorL,ColorH,convert=cls.Types.COLOR_BGR2LAB)
+            else: exit('错误：请输入正确的mode参数值')
             # 显示
-            mask = np.dstack(
-                (mask, mask, mask)
-            )  # 为了实现并排显示，需要将二值图变成3d图
+            mask = np.dstack((mask,mask,mask))  # 为了实现并排显示，需要将二值图变成3d图
             try:
-                StdVideo.Show(
-                    WINDOW_NAME, (mask, res), window_size=(1280, 720), window_mode=None
-                )
-                if show_raw:
-                    StdVideo.Show("raw_img(按ESC键退出)", img, window_size=(640, 480))
+                StdVideo.Show(WINDOW_NAME,(mask,res),window_size=(1280,720),window_mode=None)
+                if show_raw: StdVideo.Show('raw_img(按ESC键退出)',img,window_size=(640,480))
             except Exception as e:
                 print(e)
                 print(f"最终确定的阈值为：{mode}_L={ColorL},{mode}_H={ColorH}")
                 if save_path is not None:
-                    cls.save_parameters(ColorL + ColorH, save_path)
+                    cls.save_parameters(ColorL+ColorH,save_path)
                 break
         cv2.destroyWindow(WINDOW_NAME)
-        return ColorL, ColorH  # 返回确定阈值
+        return ColorL,ColorH  # 返回确定阈值
 
     @classmethod
     def color_replace(
