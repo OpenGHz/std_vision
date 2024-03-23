@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="std_vision",
-    version="1.0.1",
+    version="1.0.2",
     packages=find_packages(),
     package_dir={"": "."},
     install_requires=["numpy", "matplotlib", "opencv-python"],
