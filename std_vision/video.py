@@ -4,28 +4,120 @@ from numpy import ndarray
 import math, os
 from typing import Optional, Union, List, Dict
 import time
-from threading import Thread, Event
+from threading import Thread
 import queue
 from matplotlib import pyplot as plt
 import atexit
 
-try:  # 尝试使用ROS
-    import rospy
-    from cv_bridge import CvBridge
-    from sensor_msgs.msg import Image
-except Exception as e:
-    print(
-        f"{e}\r\n导入ROS相关包时出错。将无法使用ROS相关功能。\r\n若不使用ROS请忽略该报错。\r\n"
-    )
-    _USE__ROS__FLAG = False
-else:
-    _USE__ROS__FLAG = True
+from .ros_tools import ROSDevice
 
 
-class StdVideo(object):  # 推荐：import StdVideo as sv
+class Types(object):
+    """定义一些名称便于使用(所有其它子类中的类型也均统一放到这里)"""
+
+    COLOR_BGR2GRAY = cv2.COLOR_BGR2GRAY
+    COLOR_BGR2HSV = cv2.COLOR_BGR2HSV
+    COLOR_BGR2RGB = cv2.COLOR_BGR2RGB
+    COLOR_BGR2LAB = cv2.COLOR_BGR2LAB
+    COLOR_BGR2YCrCb = cv2.COLOR_BGR2YCrCb
+
+    THRESH_BINARY = cv2.THRESH_BINARY  # 超过阈值时取maxval，否则取0（常用）
+    THRESH_BINARY_INV = cv2.THRESH_BINARY_INV  # 与cv2.THRESH_BINARY相反
+    THRESH_TRUNC = cv2.THRESH_TRUNC  # 超过阈值时取阈值，否则不变（阈值处截断）
+    THRESH_TOZERO = cv2.THRESH_TOZERO  # 超过阈值时不变，否则取0（低于阈值取0）
+    THRESH_TOZERO_INV = (
+        cv2.THRESH_TOZERO_INV
+    )  # 超过阈值时取0，否则不变（与cv2.THRESH_TOZERO相反）
+    THRESH_ADAPTIVE_MEAN_C = (
+        cv2.ADAPTIVE_THRESH_MEAN_C
+    )  # 为局部邻域块的平均值，该算法是先求出块中的均值。
+    THRESH_ADAPTIVE_GAUSSIAN_C = (
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C
+    )  # 为局部邻域块的高斯加权和。该算法是在区域中(x, y)周围的像素根据高斯函数按照他们离中心点的距离进行加权计算。
+
+    WINDOW_NORMAL = cv2.WINDOW_NORMAL  # 用户能够调节窗口大小（常用）
+    WINDOW_AUTOSIZE = cv2.WINDOW_AUTOSIZE  # 根据图像大小显示窗口，大小固定
+    WINDOW_FREERATIO = cv2.WINDOW_FREERATIO  # 调整图像，不考虑其比例
+    WINDOW_KEEPRATIO = cv2.WINDOW_KEEPRATIO  # 调整图像，保持图像比例
+
+    CAP_TIME_LAST = cv2.CAP_PROP_POS_MSEC
+    CAP_NOW_FRAME = cv2.CAP_PROP_POS_FRAMES
+    CAP_FRAME_WIDTH = cv2.CAP_PROP_FRAME_WIDTH
+    CAP_FRAME_HEIGHT = cv2.CAP_PROP_FRAME_HEIGHT
+    CAP_FPS = cv2.CAP_PROP_FPS
+    CAP_PROP_FOURCC = cv2.CAP_PROP_FOURCC  # 视频格式，一般为MJPG和YUYV
+
+    CONTOUR_RETR_EXTERNAL = cv2.RETR_EXTERNAL  # 只检测外轮廓（常用）
+    CONTOUR_RETR_LIST = cv2.RETR_LIST  # 检测的轮廓不建立等级关系
+    CONTOUR_RETR_CCOMP = (
+        cv2.RETR_CCOMP
+    )  # 建立两个等级的轮廓，上面的一层为外边界，里面的一层为内孔的边界信息。如果内孔内还有一个连通物体，这个物体的边界也在顶层
+    CONTOUR_RETR_TREE = cv2.RETR_TREE  # 建立一个等级树结构的轮廓
+    CONTOUR_APPROX_NONE = (
+        cv2.CHAIN_APPROX_NONE
+    )  # 存储所有的轮廓点，相邻的两个点的像素位置差不超过1
+    CONTOUR_APPROX_SIMPLE = (
+        cv2.CHAIN_APPROX_SIMPLE
+    )  # 压缩水平方向，垂直方向，对角线方向的元素，只保留该方向的终点坐标
+
+    DRAW_FONT_SIMPLEX = (
+        cv2.FONT_HERSHEY_SIMPLEX
+    )  # 各字体效果：https://cloud.tencent.com/developer/article/1821937
+    DRAW_FONT_PLAIN = cv2.FONT_HERSHEY_PLAIN
+    DRAW_FONT_DUPLEX = cv2.FONT_HERSHEY_DUPLEX
+    DRAW_FONT_COMPLEX = cv2.FONT_HERSHEY_COMPLEX
+    DRAW_FONT_TRIPLEX = cv2.FONT_HERSHEY_TRIPLEX
+    DRAW_FONT_COMPLEX_SMALL = cv2.FONT_HERSHEY_COMPLEX_SMALL
+    DRAW_FONT_SCRIPT_SIMPLEX = cv2.FONT_HERSHEY_SCRIPT_SIMPLEX
+    DRAW_FONT_SCRIPT_COMPLEX = cv2.FONT_HERSHEY_SCRIPT_COMPLEX
+
+
+class FilesDevice(object):
+    """用于将一个文件夹下的所有图片模拟为一个视频设备"""
+
+    def __init__(self, files_device: str) -> None:
+        if os.path.isdir(files_device):
+            self.file_names = os.listdir(files_device)
+            self.folder_path = files_device
+        elif os.path.isfile(files_device):
+            self.file_names = [files_device.split("/")[-1]]
+        self.img_reader = self.__read_image_from_path()
+
+    def __read_image_from_path(self):
+        # 遍历该目录下的所有图片文件 #TODO:遍历顺序指定;支持多级目录
+        for filename in os.listdir(self.folder_path):
+            try:
+                yield cv2.imread(self.folder_path + "/" + filename)
+            except:
+                print(
+                    f"文件：{filename}无法被作为图像读取，已自动跳过，读取下一个文件"
+                )
+
+    def read(self):
+        try:
+            self.__image = next(self.img_reader)
+        except:
+            return False, self.__image
+        else:
+            return True, self.__image
+
+    def grab(self):
+        try:
+            next(self.img_reader)
+        except:
+            return False
+        else:
+            return True
+
+    def release(self):
+        self.img_reader = None
+
+
+class StdVideo(object):
     """
     从视频图像获取到处理后图像信息的输出一条龙的CV类，底层主要基于OpenCV实现，在其上进行了进一步封装以求更加方便使用。
     主要用于直接从视频设备获取图像并进行后续处理；同时也对ROS以及直接传入原始图像提供一定支持。
+    推荐：import StdVideo as sv
     """
 
     windows_set = (
@@ -37,132 +129,6 @@ class StdVideo(object):  # 推荐：import StdVideo as sv
     __fps_cal = {}  # 维护不同窗口的实际帧率信息（窗口名-帧率）
     pub_topics = {}  # 维护不同的图片发布话题（话题名-消息类型）
     cap_buffer: Dict[Union[int, str], Union[queue.Queue, ndarray]] = {}  # 图片队列
-
-    class Types(object):
-        """定义一些名称便于使用(所有其它子类中的类型也均统一放到这里)"""
-
-        COLOR_BGR2GRAY = cv2.COLOR_BGR2GRAY
-        COLOR_BGR2HSV = cv2.COLOR_BGR2HSV
-        COLOR_BGR2RGB = cv2.COLOR_BGR2RGB
-        COLOR_BGR2LAB = cv2.COLOR_BGR2LAB
-        COLOR_BGR2YCrCb = cv2.COLOR_BGR2YCrCb
-
-        THRESH_BINARY = cv2.THRESH_BINARY  # 超过阈值时取maxval，否则取0（常用）
-        THRESH_BINARY_INV = cv2.THRESH_BINARY_INV  # 与cv2.THRESH_BINARY相反
-        THRESH_TRUNC = cv2.THRESH_TRUNC  # 超过阈值时取阈值，否则不变（阈值处截断）
-        THRESH_TOZERO = cv2.THRESH_TOZERO  # 超过阈值时不变，否则取0（低于阈值取0）
-        THRESH_TOZERO_INV = (
-            cv2.THRESH_TOZERO_INV
-        )  # 超过阈值时取0，否则不变（与cv2.THRESH_TOZERO相反）
-        THRESH_ADAPTIVE_MEAN_C = (
-            cv2.ADAPTIVE_THRESH_MEAN_C
-        )  # 为局部邻域块的平均值，该算法是先求出块中的均值。
-        THRESH_ADAPTIVE_GAUSSIAN_C = (
-            cv2.ADAPTIVE_THRESH_GAUSSIAN_C
-        )  # 为局部邻域块的高斯加权和。该算法是在区域中(x, y)周围的像素根据高斯函数按照他们离中心点的距离进行加权计算。
-
-        WINDOW_NORMAL = cv2.WINDOW_NORMAL  # 用户能够调节窗口大小（常用）
-        WINDOW_AUTOSIZE = cv2.WINDOW_AUTOSIZE  # 根据图像大小显示窗口，大小固定
-        WINDOW_FREERATIO = cv2.WINDOW_FREERATIO  # 调整图像，不考虑其比例
-        WINDOW_KEEPRATIO = cv2.WINDOW_KEEPRATIO  # 调整图像，保持图像比例
-
-        CAP_TIME_LAST = cv2.CAP_PROP_POS_MSEC
-        CAP_NOW_FRAME = cv2.CAP_PROP_POS_FRAMES
-        CAP_FRAME_WIDTH = cv2.CAP_PROP_FRAME_WIDTH
-        CAP_FRAME_HEIGHT = cv2.CAP_PROP_FRAME_HEIGHT
-        CAP_FPS = cv2.CAP_PROP_FPS
-        CAP_PROP_FOURCC = cv2.CAP_PROP_FOURCC  # 视频格式，一般为MJPG和YUYV
-
-        CONTOUR_RETR_EXTERNAL = cv2.RETR_EXTERNAL  # 只检测外轮廓（常用）
-        CONTOUR_RETR_LIST = cv2.RETR_LIST  # 检测的轮廓不建立等级关系
-        CONTOUR_RETR_CCOMP = (
-            cv2.RETR_CCOMP
-        )  # 建立两个等级的轮廓，上面的一层为外边界，里面的一层为内孔的边界信息。如果内孔内还有一个连通物体，这个物体的边界也在顶层
-        CONTOUR_RETR_TREE = cv2.RETR_TREE  # 建立一个等级树结构的轮廓
-        CONTOUR_APPROX_NONE = (
-            cv2.CHAIN_APPROX_NONE
-        )  # 存储所有的轮廓点，相邻的两个点的像素位置差不超过1
-        CONTOUR_APPROX_SIMPLE = (
-            cv2.CHAIN_APPROX_SIMPLE
-        )  # 压缩水平方向，垂直方向，对角线方向的元素，只保留该方向的终点坐标
-
-        DRAW_FONT_SIMPLEX = (
-            cv2.FONT_HERSHEY_SIMPLEX
-        )  # 各字体效果：https://cloud.tencent.com/developer/article/1821937
-        DRAW_FONT_PLAIN = cv2.FONT_HERSHEY_PLAIN
-        DRAW_FONT_DUPLEX = cv2.FONT_HERSHEY_DUPLEX
-        DRAW_FONT_COMPLEX = cv2.FONT_HERSHEY_COMPLEX
-        DRAW_FONT_TRIPLEX = cv2.FONT_HERSHEY_TRIPLEX
-        DRAW_FONT_COMPLEX_SMALL = cv2.FONT_HERSHEY_COMPLEX_SMALL
-        DRAW_FONT_SCRIPT_SIMPLEX = cv2.FONT_HERSHEY_SCRIPT_SIMPLEX
-        DRAW_FONT_SCRIPT_COMPLEX = cv2.FONT_HERSHEY_SCRIPT_COMPLEX
-
-    class ROSDevice(object):
-        """用于将ROS图像订阅模拟为一个视频设备"""
-
-        def __init__(self, name, data_class=Image, queue_size=1) -> None:
-            rospy.wait_for_message(name, Image, timeout=1)
-            self.ros_device = name
-            self.image = None
-            self.img_suber = rospy.Subscriber(
-                name, Image, queue_size=queue_size, callback=self.img_call_back
-            )
-            self.__new = Event()
-
-        def read(self):
-            if self.__new.wait(timeout=1):  # 图像流帧率不低于1Hz
-                self.__new.clear()
-                return True, self.image
-            else:
-                return False, self.image
-
-        def release(self):
-            self.img_suber.unregister()
-
-        def img_call_back(self, img_msg):
-            image = CvBridge().imgmsg_to_cv2(img_msg)
-            self.image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-            self.__new.set()
-
-    class FilesDevice(object):
-        """用于将一个文件夹下的所有图片模拟为一个视频设备"""
-
-        def __init__(self, files_device: str) -> None:
-            if os.path.isdir(files_device):
-                self.file_names = os.listdir(files_device)
-                self.folder_path = files_device
-            elif os.path.isfile(files_device):
-                self.file_names = [files_device.split("/")[-1]]
-            self.img_reader = self.__read_image_from_path()
-
-        def __read_image_from_path(self):
-            # 遍历该目录下的所有图片文件 #TODO:遍历顺序指定;支持多级目录
-            for filename in os.listdir(self.folder_path):
-                try:
-                    yield cv2.imread(self.folder_path + "/" + filename)
-                except:
-                    print(
-                        f"文件：{filename}无法被作为图像读取，已自动跳过，读取下一个文件"
-                    )
-
-        def read(self):
-            try:
-                self.__image = next(self.img_reader)
-            except:
-                return False, self.__image
-            else:
-                return True, self.__image
-
-        def grab(self):
-            try:
-                next(self.img_reader)
-            except:
-                return False
-            else:
-                return True
-
-        def release(self):
-            self.img_reader = None
 
     @classmethod
     def Find(cls, max_num=5):
@@ -203,7 +169,7 @@ class StdVideo(object):  # 推荐：import StdVideo as sv
             raise Exception("请不要重复获取同一设备的视频流")
         else:
             if isinstance(device, tuple):  # ROS话题订阅
-                cls.cap_dict[device[0]] = cls.ROSDevice(*device)
+                cls.cap_dict[device[0]] = ROSDevice(*device)
                 return cap  # 直接返回，虚拟设备不进行后续检查与配置
             else:
                 cap = cv2.VideoCapture(
@@ -305,7 +271,7 @@ class StdVideo(object):  # 推荐：import StdVideo as sv
                 frame_cp = cls.Geometry.Resize(frame_cp, lis2)
             if len(resize_xyc) == 3:
                 if resize_xyc[2] == 0:
-                    frame_cp = cv2.cvtColor(frame_cp, cls.Types.COLOR_BGR2GRAY)
+                    frame_cp = cv2.cvtColor(frame_cp, Types.COLOR_BGR2GRAY)
                 else:
                     frame_cp = cls.Threshold.gray_global(frame_cp, resize_xyc[2], 255)
         if color_convert is not None:
@@ -335,7 +301,7 @@ class StdVideo(object):  # 推荐：import StdVideo as sv
     @classmethod
     def Info(cls, device, info_name):
         """除了基本信息的全局字典外，提供获取其它参数的函数"""
-        if info_name == cls.Types.CAP_PROP_FOURCC:
+        if info_name == Types.CAP_PROP_FOURCC:
             fourcc = int(cls.cap_dict[device].get(cv2.CAP_PROP_FOURCC))
             fourcc_str = (
                 chr(fourcc & 0xFF)
@@ -532,141 +498,6 @@ class StdVideo(object):  # 推荐：import StdVideo as sv
             (frame, frame, frame)
         )  # 为了实现并排显示，需要将二值图变成3d图
 
-    @classmethod
-    def ToROS(cls, frame: ndarray, name="", data_class=None):
-        """选择发送转换后的图片(当name不为none时)或仅将图片返回"""
-        ros_img = CvBridge().cv2_to_imgmsg(frame)
-        if name != "" and data_class is not None:
-            if not cls.pub_topics.get(name):  # 首次处理进行发布者创建
-                img_pub = rospy.Publisher(name, data_class)
-                cls.pub_topics[name] = img_pub
-            # 话题发布
-            cls.pub_topics[name].publish(ros_img)
-        else:
-            return ros_img
-
-    @staticmethod
-    def ToCV2(frame) -> ndarray:
-        """将ROS图像或realsense彩色图像转为OpenCV格式"""
-        frame_type = type(frame)
-        if frame_type is Image:
-            return CvBridge().imgmsg_to_cv2(frame)
-        else:
-            import pyrealsense2 as rs
-
-            if frame_type is rs.pyrealsense2.BufData:
-                return np.asanyarray(frame)
-            elif frame_type is rs.pyrealsense2.video_frame:
-                return np.asanyarray(frame.get_data())
-
-    @classmethod
-    def ToSerial(
-        cls,
-        data_cmd,
-        port_vpid: str,
-        baudrate=115200,
-        bytesize=8,
-        parity="N",
-        stopbits=1,
-        timeout=None,
-        find=False,
-    ):
-        """
-        通过串口发送有关数据；port_pid可以是端口号（Linux下比如是'/dev/ttyUSB0',Windows下比如是'COM8'），也可以是设备的vid和pid信息结合。如，
-        vid为6790，PID为29987，则写为'6790_29987'。
-        """
-        if not hasattr(cls.ToSerial, f"{port_vpid}"):
-            from serial import Serial  # 要装pyserial
-            import serial.tools.list_ports
-
-            if find is True:
-                port_list = list(serial.tools.list_ports.comports())
-                device_list = [port.device for port in port_list]
-                vid_list = [port.vid for port in port_list]
-                pid_list = [port.pid for port in port_list]
-                description_list = [port.description for port in port_list]
-                print("共检测到这些设备：", device_list)
-                print("设备的VID为：", vid_list)
-                print("设备的PID为：", pid_list)
-                print("设备的descriptio为：", description_list)
-                print(type(pid_list[0]))
-                return
-            cls.ToSerial.__dict__[f"{port_vpid}"] = None
-
-            # 继承串口类
-            class MySerial(Serial):
-                """
-                继承串口类，实现了可以在初始化时不用配置任何信息，通过新增加的comset函数进行配置，然后通过connect进行鲁棒的连接。
-                初始化和comset可以都不指定端口号，而是在connect时再指定。
-                """
-
-                # 配置串口参数（可以不包括端口号）
-                def ComSet(
-                    self, baudrate, bytesize, parity, stopbits, timeout, port=None
-                ):
-                    d = {
-                        "baudrate": baudrate,
-                        "bytesize": bytesize,
-                        "parity": parity,
-                        "stopbits": stopbits,
-                        "timeout": timeout,
-                    }
-                    self.apply_settings(d)
-                    self.port = port
-
-                # 选择端口号并尝试连接
-                def Connect(self, rs_port=None):
-                    if self.is_open:
-                        print(f"已成功连接串口{self.port}")
-                        return
-                    if rs_port is None:
-                        if self.port is not None:
-                            rs_port = self.port
-                        else:
-                            raise Exception("缺少串口号，请检查串口配置")
-                    # 没连接到串口则一直连接
-                    while True:
-                        port_list = list(serial.tools.list_ports.comports())
-                        if len(port_list) == 0:
-                            exit("没有可用串口")
-                        else:
-                            port_list = [port.device for port in port_list]
-                            port_list = ";".join(
-                                list(map(str, port_list))
-                            )  # 将字符串列表转换为一整个字符串
-                            if rs_port in port_list:  # 判断选用的端口是否在其中
-                                self.port = rs_port
-                                self.open()  # 开启串口
-                                if self.is_open:
-                                    print(f"成功连接串口{rs_port}")
-                                    return
-                                else:
-                                    print(f"已找到目标端口号{rs_port}，但无法连接")
-                            else:
-                                print(
-                                    "未找到目标端口号{}。找到的所有端口为：{}".format(
-                                        rs_port, port_list
-                                    )
-                                )
-
-            # 串口初始化与连接
-            if "_" in port_vpid:
-                vid, pid = port_vpid.split("_")
-                port_list = list(serial.tools.list_ports.comports())
-                device_list = [port.device for port in port_list]
-                vid_list = [port.vid for port in port_list]
-                pid_list = [port.pid for port in port_list]
-                if (int(pid) in pid_list) and (int(vid) in vid_list):
-                    port_vpid = device_list[pid_list.index(int(pid))]
-                else:
-                    exit("错误：pid和vid与现连接所有设备不匹配")
-            ser = MySerial(port_vpid, baudrate, bytesize, parity, stopbits, timeout)
-            # ser.Connect()
-            cls.ToSerial.__dict__[f"{port_vpid}"] = ser
-            atexit.register(ser.close)  # 程序退出时关闭串口
-        if data_cmd is not None:  # 发送数据
-            cls.ToSerial.__dict__[f"{port_vpid}"].write(data_cmd)
-
     @staticmethod
     def Cover(base: ndarray, coveror: ndarray, position=(0, 0), mask=None, quit=True):
         """
@@ -743,7 +574,7 @@ class StdVideo(object):  # 推荐：import StdVideo as sv
         plt.figure(dpi=dpi)  # 调整图像dpi，dpi过低会无法显示一些图像细节信息
         for index, frame in enumerate(frames, 1):
             if convert_color:
-                frame = cv2.cvtColor(frame, cls.Types.COLOR_BGR2RGB)
+                frame = cv2.cvtColor(frame, Types.COLOR_BGR2RGB)
             plt.subplot(*row_col, index), plt.imshow(frame, "gray"), plt.axis("off")
             plt.subplots_adjust(
                 top=1, bottom=0, right=1, left=0, hspace=0, wspace=0
@@ -871,7 +702,7 @@ class StdVideo(object):  # 推荐：import StdVideo as sv
                 def get_img():
                     return cls.Read(frame_dev_topic)
         # 尝试topic
-        elif isinstance(frame_dev_topic, str) and _USE__ROS__FLAG:
+        elif isinstance(frame_dev_topic, str) and ROSDevice.ready:
             import subprocess
             try:
                 p = subprocess.getoutput("pgrep rosmaster")
@@ -932,7 +763,7 @@ class StdVideo(object):  # 推荐：import StdVideo as sv
                 ColorL = [LH, LS, LV]
                 ColorH = [HH, HS, HV]
                 img = get_img()
-                res, mask = StdVideo.color_filter(img,ColorL,ColorH,convert=cls.Types.COLOR_BGR2HSV)
+                res, mask = StdVideo.color_filter(img,ColorL,ColorH,convert=Types.COLOR_BGR2HSV)
             elif mode in ['YUV','YCrCb']:
                 LY = cv2.getTrackbarPos('LY ', WINDOW_NAME)
                 LCr = cv2.getTrackbarPos('LCr', WINDOW_NAME)
@@ -943,7 +774,7 @@ class StdVideo(object):  # 推荐：import StdVideo as sv
                 ColorL = [LY, LCr, LCb]
                 ColorH = [HY, HCr, HCb]
                 img = get_img()
-                res, mask = StdVideo.color_filter(img,ColorL,ColorH,convert=cls.Types.COLOR_BGR2YCrCb)
+                res, mask = StdVideo.color_filter(img,ColorL,ColorH,convert=Types.COLOR_BGR2YCrCb)
             elif mode in ['Lab','LAB']:
                 LL = cv2.getTrackbarPos('LL', WINDOW_NAME)
                 LA = cv2.getTrackbarPos('LA', WINDOW_NAME)
@@ -954,7 +785,7 @@ class StdVideo(object):  # 推荐：import StdVideo as sv
                 ColorL = [LL, LA, LB]
                 ColorH = [HL, HA, HB]
                 img = get_img()
-                res, mask = StdVideo.color_filter(img,ColorL,ColorH,convert=cls.Types.COLOR_BGR2LAB)
+                res, mask = StdVideo.color_filter(img,ColorL,ColorH,convert=Types.COLOR_BGR2LAB)
             else: exit('错误：请输入正确的mode参数值')
             # 显示
             mask = np.dstack((mask,mask,mask))  # 为了实现并排显示，需要将二值图变成3d图

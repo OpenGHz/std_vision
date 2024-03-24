@@ -1,12 +1,11 @@
 from typing import Optional
+from ros_tools import RosTools
+import numpy as np
 
-try:
+
+if RosTools.ready:
     import rospy
-except:
-    __USE__ROS__FLAG = False
-else:
-    __USE__ROS__FLAG = True
-    from sensor_msgs.msg import CameraInfo
+    from sensor_msgs.msg import CameraInfo, Image
 
 
 class UnitConvert(object):
@@ -23,7 +22,7 @@ class UnitConvert(object):
         注意图片必须是相机原生拍摄或使用系统相机软件拍摄得到的，而
         不能是用OpenCV读取后保存的，因为这种情况下图片其它信息丢失了。
         """
-        if topic != "" and __USE__ROS__FLAG:  # 从ROS话题获取消息
+        if topic != "":  # 从ROS话题获取消息
             if topic == "":
                 topic = cls.default_topic_name
             info = rospy.wait_for_message(topic, CameraInfo)
@@ -94,3 +93,17 @@ class UnitConvert(object):
     def convert_meter_bias_to_pixels(cls, device, meter_bias, distance):
         """转换meter-像素数"""
         return 1 / (cls.unit_coefficient[device] * distance) * meter_bias
+
+
+def ToCV2(frame) -> np.ndarray:
+    """将ROS图像或realsense彩色图像转为OpenCV格式"""
+    frame_type = type(frame)
+    if frame_type is Image:
+        return RosTools.imgmsg_to_cv2(frame)
+    else:
+        import pyrealsense2 as rs
+
+        if frame_type is rs.pyrealsense2.BufData:
+            return np.asanyarray(frame)
+        elif frame_type is rs.pyrealsense2.video_frame:
+            return np.asanyarray(frame.get_data())
