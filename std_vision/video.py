@@ -9,7 +9,7 @@ import queue
 from matplotlib import pyplot as plt
 import atexit
 
-from .ros_tools import ROSDevice
+from .ros_tools import ROSDevice, RosTools
 
 
 class Types(object):
@@ -702,8 +702,11 @@ class StdVideo(object):
                 def get_img():
                     return cls.Read(frame_dev_topic)
         # 尝试topic
-        elif isinstance(frame_dev_topic, str) and ROSDevice.ready:
+        elif isinstance(frame_dev_topic, str):
+            assert ROSDevice.ready, "Try as ROS topic name, but ROS is not ready."
             import subprocess
+            import rospy
+            from sensor_msgs.msg import Image
             try:
                 p = subprocess.getoutput("pgrep rosmaster")
                 if p == '': raise Exception('连接错误：rosmaster未开启，使用ROS模式请先启动roscore')
@@ -723,7 +726,7 @@ class StdVideo(object):
                 print(f'成功连接ROS话题:{frame_dev_topic}')
                 def get_img():
                     img = rospy.wait_for_message(frame_dev_topic, Image)
-                    return CvBridge().imgmsg_to_cv2(img,"bgr8")
+                    return RosTools.imgmsg_to_cv2(img)
 
         # 创建窗口和滑条
         def callback(*arg):
@@ -794,7 +797,7 @@ class StdVideo(object):
                 if show_raw: StdVideo.Show('raw_img(按ESC键退出)',img,window_size=(640,480))
             except Exception as e:
                 print(e)
-                print(f"最终确定的阈值为：{mode}_L={ColorL},{mode}_H={ColorH}")
+                print(f'最终确定的阈值为："{mode}_L":{ColorL}, "{mode}_H":{ColorH}')
                 if save_path is not None:
                     cls.save_parameters(ColorL+ColorH,save_path)
                 break
