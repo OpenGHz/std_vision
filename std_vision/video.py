@@ -117,7 +117,7 @@ class StdVideo(object):
     """
     从视频图像获取到处理后图像信息的输出一条龙的CV类，底层主要基于OpenCV实现，在其上进行了进一步封装以求更加方便使用。
     主要用于直接从视频设备获取图像并进行后续处理；同时也对ROS以及直接传入原始图像提供一定支持。
-    推荐：import StdVideo as sv
+    推荐：from std_vision.video import StdVideo as sv
     """
 
     windows_set = (

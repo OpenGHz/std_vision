@@ -115,6 +115,7 @@ class ROSDevice(object):
     """用于将ROS图像订阅模拟为一个视频设备"""
     ready = ROS_OK
     def __init__(self, name, data_class=Image, queue_size=1) -> None:
+        # TODO:data_class传递参数类型报错
         rospy.wait_for_message(name, Image, timeout=1)
         self.ros_device = name
         self.image = None
@@ -134,6 +135,6 @@ class ROSDevice(object):
         self.img_suber.unregister()
 
     def img_call_back(self, img_msg):
-        image = CvBridge().imgmsg_to_cv2(img_msg)
+        image = RosTools.imgmsg_to_cv2(img_msg)
         self.image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
         self.__new.set()

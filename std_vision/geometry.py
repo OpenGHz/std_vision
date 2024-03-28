@@ -34,7 +34,10 @@ class Geometry(object):
 
     @staticmethod
     def Rotation(frame: ndarray, angle, center=None, scale=1):
-        """center为none默认图像中心为旋转中心（旋转是逆时针的）；scale为旋转后图像的放缩倍数"""
+        """
+        旋转图像frame，angle为旋转角度，单位为度deg；
+        center为none默认图像中心为旋转中心（旋转是逆时针的）；
+        scale为旋转后图像的放缩倍数"""
         rows_cols = frame.shape
         if center is None:
             center = ((rows_cols[1] - 1) / 2.0, (rows_cols[0] - 1) / 2.0)
